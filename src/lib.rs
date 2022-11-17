@@ -7,6 +7,12 @@ use embedded_hal::serial::{self, Read};
 // Data:  10 byte (ascii encoded hex)
 // Checksum: 2 byte
 // Tail: 1 byte  (==3)
+const HEAD : u8 = 0x02;
+const TAIL : u8 = 0x03;
+const BODY_LENGTH : usize = 12;
+const CHECKSUM_LENGTH : usize = 2;
+const TAG_LENGTH : usize = 5;
+
 pub enum State {
     ReadHead,
     ReadBody,
@@ -15,7 +21,7 @@ pub enum State {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct RfidTag {
-    pub id: [u8; 5],
+    pub id: [u8; TAG_LENGTH],
 }
 
 #[derive(Debug)]
@@ -41,7 +47,7 @@ impl<E> From<E> for Error<E> {
 pub struct Rdm6300<R: Read<u8>> {
     serial: R,
     state: State,
-    buffer: [u8; 12],
+    buffer: [u8; BODY_LENGTH],
     offset: usize,
 }
 
@@ -50,7 +56,7 @@ impl<R: Read<u8>> Rdm6300<R> {
         Rdm6300 {
             serial,
             state: State::ReadHead,
-            buffer: [0; 12],
+            buffer: [0; BODY_LENGTH],
             offset: 0,
         }
     }
@@ -85,7 +91,7 @@ impl<R: Read<u8>> Rdm6300<R> {
             match self.state {
                 State::ReadHead => {
                     let byte = Self::read_byte(&mut self.serial)?;
-                    if byte == 0x02 {
+                    if byte == HEAD {
                         self.state = State::ReadBody;
                     } else {
                         return Err(nb::Error::Other(Error::DecodeError(
@@ -94,12 +100,12 @@ impl<R: Read<u8>> Rdm6300<R> {
                     }
                 }
                 State::ReadBody => {
-                    self.read_bytes::<12>()?;
+                    self.read_bytes::<BODY_LENGTH>()?;
                     self.state = State::ReadTail
                 }
                 State::ReadTail => {
                     let byte = Self::read_byte(&mut self.serial)?;
-                    if byte == 0x03 {
+                    if byte == TAIL {
                         self.reset()
                     } else {
                         self.reset();
@@ -125,17 +131,17 @@ fn ascii_encoded_to_value(ascii: u8) -> Option<u8> {
     }
 }
 
-fn decode(data: &[u8; 12]) -> Result<RfidTag, DecodeError> {
-    let mut decoded_data = [0u8; 5];
+fn decode(data: &[u8; BODY_LENGTH]) -> Result<RfidTag, DecodeError> {
+    let mut decoded_data = [0u8; TAG_LENGTH];
     for i in 0..decoded_data.len() {
         decoded_data[i] = ascii_encoded_to_value(data[i * 2]).ok_or(DecodeError::InvalidData)?
             * 2u8.pow(4)
             + ascii_encoded_to_value(data[i * 2 + 1]).ok_or(DecodeError::InvalidData)?;
     }
 
-    let decoded_checksum = ascii_encoded_to_value(data[10]).ok_or(DecodeError::InvalidData)?
+    let decoded_checksum = ascii_encoded_to_value(data[BODY_LENGTH - CHECKSUM_LENGTH]).ok_or(DecodeError::InvalidData)?
         * 2u8.pow(4)
-        + ascii_encoded_to_value(data[11]).ok_or(DecodeError::InvalidData)?;
+        + ascii_encoded_to_value(data[BODY_LENGTH - CHECKSUM_LENGTH + 1]).ok_or(DecodeError::InvalidData)?;
 
     let mut expected_checksum = 0u8;
     for byte in decoded_data {
