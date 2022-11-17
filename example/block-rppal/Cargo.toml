@@ -1,0 +1,11 @@
+[package]
+name = "block-rppal"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+nb = "1.0.0"
+rdm3600-rs = { version = "0.1.0", path = "../.." }
+rppal = { version = "0.14.0", features = ["hal"] }

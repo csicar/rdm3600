@@ -1,4 +1,4 @@
-use std::{convert::Infallible, mem::transmute};
+#![no_std]
 
 use embedded_hal::serial::{self, Read};
 
@@ -46,10 +46,12 @@ pub struct Rdm6300<R: Read<u8>> {
 }
 
 impl<R: Read<u8>> Rdm6300<R> {
-
-    fn new(serial: R) -> Self {
+    pub fn new(serial: R) -> Self {
         Rdm6300 {
-            serial, state: State::ReadHead, buffer: [0; 12], offset:0
+            serial,
+            state: State::ReadHead,
+            buffer: [0; 12],
+            offset: 0,
         }
     }
     fn read_byte(dev: &mut R) -> nb::Result<u8, Error<R::Error>> {
@@ -69,6 +71,15 @@ impl<R: Read<u8>> Rdm6300<R> {
         }
     }
 
+    /// Reset State Machine to prepare for a new package
+    pub fn reset(&mut self) {
+        self.offset = 0;
+        self.state = State::ReadHead;
+    }
+
+    /// Reads a single RFID-Tag.
+    /// Returns `WouldBlock` if not enough data is available on the serial interface
+    /// Returns `Error` if reading the RFID-Tag failed
     pub fn read(&mut self) -> nb::Result<RfidTag, Error<R::Error>> {
         loop {
             match self.state {
@@ -89,9 +100,9 @@ impl<R: Read<u8>> Rdm6300<R> {
                 State::ReadTail => {
                     let byte = Self::read_byte(&mut self.serial)?;
                     if byte == 0x03 {
-                        self.state = State::ReadHead;
+                        self.reset()
                     } else {
-                        self.state = State::ReadHead;
+                        self.reset();
                         return Err(nb::Error::Other(Error::DecodeError(
                             DecodeError::InvalidTail,
                         )));
@@ -108,7 +119,6 @@ impl<R: Read<u8>> Rdm6300<R> {
 fn ascii_encoded_to_value(ascii: u8) -> Option<u8> {
     let ascii_char = ascii as char;
     if let Some(value) = ascii_char.to_digit(16) {
-        println!("char: {:?} {:?} -> {:?}", ascii_char, ascii, value);
         Some(value as u8)
     } else {
         None
@@ -170,17 +180,16 @@ fn example_invalid_checksum() {
     .unwrap();
 }
 
-
 #[cfg(test)]
 mod test {
-    use embedded_hal_mock::{serial::{
-        Mock as SerialMock,
-        Transaction as SerialTransaction,
-    }, MockError};
+    use embedded_hal_mock::{
+        serial::{Mock as SerialMock, Transaction as SerialTransaction},
+        MockError,
+    };
     use nb::block;
 
-    use crate::{Rdm6300, RfidTag, DecodeError, Error};
-    
+    use crate::{DecodeError, Error, Rdm6300, RfidTag};
+
     #[test]
     fn serial_happy() {
         let expectations = [
@@ -191,9 +200,12 @@ mod test {
         let serial = SerialMock::new(&expectations);
         let mut rdm = Rdm6300::new(serial);
         let rfid = rdm.read().unwrap();
-        assert_eq!(rfid, RfidTag {
-            id: [0x14, 0x00, 0x8e, 0xc7, 0x93]
-        });
+        assert_eq!(
+            rfid,
+            RfidTag {
+                id: [0x14, 0x00, 0x8e, 0xc7, 0x93]
+            }
+        );
     }
 
     #[test]
@@ -208,9 +220,12 @@ mod test {
         let mut rdm = Rdm6300::new(serial);
         rdm.read().expect_err("invalid start");
         let rfid = rdm.read().unwrap();
-        assert_eq!(rfid, RfidTag {
-            id: [0x14, 0x00, 0x8e, 0xc7, 0x93]
-        });
+        assert_eq!(
+            rfid,
+            RfidTag {
+                id: [0x14, 0x00, 0x8e, 0xc7, 0x93]
+            }
+        );
     }
 
     #[test]
@@ -243,8 +258,61 @@ mod test {
         let serial = SerialMock::new(&expectations);
         let mut rdm = Rdm6300::new(serial);
         let rfid = block!(rdm.read()).unwrap();
-        assert_eq!(rfid, RfidTag {
-            id: [0x14, 0x00, 0x8e, 0xc7, 0x93]
-        });
+        assert_eq!(
+            rfid,
+            RfidTag {
+                id: [0x14, 0x00, 0x8e, 0xc7, 0x93]
+            }
+        );
+    }
+
+    #[test]
+    fn serial_block_recover_2() {
+        let expectations = [
+            // First Scan
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read(0x02_u8),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_many(b"14008EC"),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_many(b"793CE"),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read(0x03_u8),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            // Second Scan
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read(0x02_u8),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_many(b"14008EC"),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_many(b"793CE"),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+            SerialTransaction::read(0x03_u8),
+            SerialTransaction::read_error(nb::Error::WouldBlock),
+        ];
+        let serial = SerialMock::new(&expectations);
+        let mut rdm = Rdm6300::new(serial);
+        let rfid = block!(rdm.read()).unwrap();
+        let rfid = block!(rdm.read()).unwrap();
+        assert_eq!(
+            rfid,
+            RfidTag {
+                id: [0x14, 0x00, 0x8e, 0xc7, 0x93]
+            }
+        );
     }
 }
