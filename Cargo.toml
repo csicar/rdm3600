@@ -1,7 +1,15 @@
 [package]
-name = "rdm3600-rs"
+name = "rdm3600"
 version = "0.1.0"
 edition = "2021"
+authors = ["csicar <cargo@csicar.de>"]
+readme = "README.md"
+documentation = "https://docs.rs/rdm3600"
+repository = "https://github.com/csicar/rdm3600"
+description = "Embedded-Hal driver for the RDM3600 RFID scanner"
+license = "MPL-2.0 OR GPL-2.-only"
+categories = ["embedded", "no-std"]
+keywords = ["embedded-hal", "rdm3600", "rdm360", "rfid"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
