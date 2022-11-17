@@ -1,17 +1,17 @@
 #![no_std]
 
-use embedded_hal::serial::{self, Read};
+use embedded_hal::serial::Read;
 
 // Frame of 14 bytes
 // Head : 1byte (==2)
 // Data:  10 byte (ascii encoded hex)
 // Checksum: 2 byte
 // Tail: 1 byte  (==3)
-const HEAD : u8 = 0x02;
-const TAIL : u8 = 0x03;
-const BODY_LENGTH : usize = 12;
-const CHECKSUM_LENGTH : usize = 2;
-const TAG_LENGTH : usize = 5;
+const HEAD: u8 = 0x02;
+const TAIL: u8 = 0x03;
+const BODY_LENGTH: usize = 12;
+const CHECKSUM_LENGTH: usize = 2;
+const TAG_LENGTH: usize = 5;
 
 pub enum State {
     ReadHead,
@@ -124,11 +124,7 @@ impl<R: Read<u8>> Rdm6300<R> {
 
 fn ascii_encoded_to_value(ascii: u8) -> Option<u8> {
     let ascii_char = ascii as char;
-    if let Some(value) = ascii_char.to_digit(16) {
-        Some(value as u8)
-    } else {
-        None
-    }
+    ascii_char.to_digit(16).map(|value| value as u8)
 }
 
 fn decode(data: &[u8; BODY_LENGTH]) -> Result<RfidTag, DecodeError> {
@@ -139,9 +135,11 @@ fn decode(data: &[u8; BODY_LENGTH]) -> Result<RfidTag, DecodeError> {
             + ascii_encoded_to_value(data[i * 2 + 1]).ok_or(DecodeError::InvalidData)?;
     }
 
-    let decoded_checksum = ascii_encoded_to_value(data[BODY_LENGTH - CHECKSUM_LENGTH]).ok_or(DecodeError::InvalidData)?
+    let decoded_checksum = ascii_encoded_to_value(data[BODY_LENGTH - CHECKSUM_LENGTH])
+        .ok_or(DecodeError::InvalidData)?
         * 2u8.pow(4)
-        + ascii_encoded_to_value(data[BODY_LENGTH - CHECKSUM_LENGTH + 1]).ok_or(DecodeError::InvalidData)?;
+        + ascii_encoded_to_value(data[BODY_LENGTH - CHECKSUM_LENGTH + 1])
+            .ok_or(DecodeError::InvalidData)?;
 
     let mut expected_checksum = 0u8;
     for byte in decoded_data {
@@ -160,9 +158,9 @@ fn ascii_decode() {
     assert_eq!(asd, 12);
     let asd = ascii_encoded_to_value(0x31).unwrap();
     assert_eq!(asd, 1);
-    let asd = ascii_encoded_to_value('0' as u8).unwrap();
+    let asd = ascii_encoded_to_value(b'0').unwrap();
     assert_eq!(asd, 0);
-    let asd = ascii_encoded_to_value('A' as u8).unwrap();
+    let asd = ascii_encoded_to_value(b'A').unwrap();
     assert_eq!(asd, 10);
 }
 
@@ -179,7 +177,7 @@ fn example() {
 #[should_panic]
 #[test]
 fn example_invalid_checksum() {
-    let asd = decode(&[
+    decode(&[
         0x31, 0x34, 0x30, 0x30, 0x38, 0x45, 0x43, 0x37, 0x39, 0x33, //CS
         0x43, 0x46,
     ])
@@ -188,10 +186,7 @@ fn example_invalid_checksum() {
 
 #[cfg(test)]
 mod test {
-    use embedded_hal_mock::{
-        serial::{Mock as SerialMock, Transaction as SerialTransaction},
-        MockError,
-    };
+    use embedded_hal_mock::serial::{Mock as SerialMock, Transaction as SerialTransaction};
     use nb::block;
 
     use crate::{DecodeError, Error, Rdm6300, RfidTag};
@@ -312,13 +307,12 @@ mod test {
         ];
         let serial = SerialMock::new(&expectations);
         let mut rdm = Rdm6300::new(serial);
+        let expected_rfid = RfidTag {
+            id: [0x14, 0x00, 0x8e, 0xc7, 0x93],
+        };
         let rfid = block!(rdm.read()).unwrap();
+        assert_eq!(rfid, expected_rfid);
         let rfid = block!(rdm.read()).unwrap();
-        assert_eq!(
-            rfid,
-            RfidTag {
-                id: [0x14, 0x00, 0x8e, 0xc7, 0x93]
-            }
-        );
+        assert_eq!(rfid, expected_rfid);
     }
 }
